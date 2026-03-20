@@ -5,14 +5,69 @@
 #include <unistd.h>
 #include <sys/wait.h>
 #include <cstdlib>
+#include <fcntl.h>
 
 using namespace std;
 
-void execute(vector<char *> &args)
+void execute(vector<string> &tokens)
 {
+    int in_fd = -1, out_fd = -1;
+    vector<string> cmd;
+
+    for(int i=0;i<tokens.size();i++) {
+        if(tokens[i] == ">"){
+            if(i+1 >= tokens.size()){
+                cerr << "Error: No file specified for output\n";
+                return;
+            }
+
+            out_fd = open(tokens[i+1].c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+            
+            if(out_fd < 0){
+                perror("open failed");
+                return;
+            }
+            i++;
+        }
+        else if(tokens[i] == "<"){
+            if(i+1 >= tokens.size()){
+                cerr << "Error: No file specified for input\n";
+                return;
+            }
+
+            in_fd = open(tokens[i+1].c_str(), O_RDONLY);
+
+            if(in_fd < 0){
+                perror("open failed");
+                return;
+            }
+            i++;
+        }
+        else{
+            cmd.push_back(tokens[i]);
+        }
+    }
+
+    if(cmd.empty()) return;
+
+    vector<char*> args;
+    for(auto& s : cmd){
+        args.push_back(const_cast<char*>(s.c_str()));
+    }
+    args.push_back(nullptr);
+
     pid_t pid = fork();
     if (pid == 0)
     {
+        if(in_fd != -1){
+            dup2(in_fd, STDIN_FILENO);
+            close(in_fd);
+        }
+
+        if(out_fd != -1){
+            dup2(out_fd, STDOUT_FILENO);
+            close(out_fd);
+        }
         execvp(args[0], args.data());
         perror("execvp failed");
         exit(1);
@@ -106,7 +161,6 @@ int main()
 
         if(handleBuiltins(tokens)) continue;
 
-        vector<char *> args = toCharArray(tokens);
-        execute(args);
+        execute(tokens);
     }
 }
