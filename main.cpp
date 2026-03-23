@@ -6,10 +6,40 @@
 #include <sys/wait.h>
 #include <cstdlib>
 #include <fcntl.h>
+#include <limits.h>
+#include <cstring>
 
 using namespace std;
 
 pid_t foreground_pid = -1;
+
+vector<string> history;
+
+string getPrompt(){
+    char cwd[PATH_MAX];
+    getcwd(cwd, sizeof(cwd));
+
+    const char* user = getenv("USER");
+    const char* home = getenv("HOME");
+    if(!user) user = "user";
+
+    string path = cwd;
+    if(home && path.find(home) == 0){
+        path.replace(0, strlen(home), "~");
+    }
+
+    string GREEN = "\033[32m";
+    string BLUE = "\033[34m";
+    string YELLOW = "\033[33m";
+    string RESET = "\033[0m";
+
+    return GREEN + string(user) + 
+           RESET + "@" + 
+           BLUE + "shell:" + 
+           RESET + ":" + 
+           YELLOW + string(cwd) + 
+           RESET + "$ ";
+}
 
 void handle_sigchld(int){
     while(waitpid(-1, nullptr, WNOHANG)>0);
@@ -41,14 +71,37 @@ vector<string> parse(const string &input)
 
 bool handleBuiltins(vector<string> &tokens)
 {
+    if (tokens[0] == "clear"){
+        system("clear");
+        return true;
+    }
+
+    if(tokens[0] == "history"){
+        for(int i=0;i<history.size();i++){
+            cout<<i+1<<" "<<history[i]<<endl;
+        }
+        return true;
+    }
+
     if (tokens[0] == "exit")
     {
         exit(0);
     }
 
+    if(tokens[0] == "pwd"){
+        char cwd[PATH_MAX];
+        if(getcwd(cwd, sizeof(cwd)) != NULL){
+            cout<<cwd<<endl;
+        }
+        else{
+            perror("pwd failed");
+        }
+        return true;
+    }
+
     if (tokens[0] == "cd")
     {
-        if (tokens.size() < 2)
+        if (tokens.size() < 2 || tokens[1] == "~")
         {
             const char *home = getenv("HOME");
             if (home == nullptr)
@@ -144,6 +197,10 @@ void execute(vector<string> &tokens)
                     out_fd = open(commands[i][j+1].c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
                     j++;
                 }
+                else if(commands[i][j] == ">>"){
+                    out_fd = open(commands[i][j+1].c_str(), O_WRONLY | O_CREAT | O_APPEND, 0644);
+                    j++;
+                }
                 else{
                     cmd.push_back(commands[i][j]);
                 }
@@ -161,7 +218,7 @@ void execute(vector<string> &tokens)
 
             vector<char*> args = toCharArray(cmd);
             execvp(args[0], args.data());
-            perror("execvp failed");
+            cerr<<args[0]<<": command not found"<<endl;
             exit(1);
         }
         else if(pid>0){
@@ -196,12 +253,14 @@ int main()
     while (true)
     {
         string input;
-        cout << "my_shell> " << flush;
+        cout <<getPrompt()<< flush;
 
         if (!getline(cin, input))
             break;
         if (input.empty())
             continue;
+
+        history.push_back(input);
 
         vector<string> tokens = parse(input);
         if (tokens.empty())
