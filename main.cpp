@@ -9,6 +9,12 @@
 
 using namespace std;
 
+pid_t foreground_pid = -1;
+
+void handle_sigchld(int){
+    while(waitpid(-1, nullptr, WNOHANG)>0);
+}
+
 vector<char *> toCharArray(vector<string> &args)
 {
     vector<char *> res;
@@ -71,6 +77,14 @@ bool handleBuiltins(vector<string> &tokens)
 
 void execute(vector<string> &tokens)
 {
+
+    bool isBackground = false;
+
+    if(!tokens.empty() && tokens.back() == "&"){
+        isBackground = true;
+        tokens.pop_back();
+    }
+
     vector<vector<string>> commands;
     vector<string> current;
 
@@ -91,6 +105,8 @@ void execute(vector<string> &tokens)
     int n = commands.size();
     int prev_fd = -1;
 
+    vector<pid_t> pids;
+
     for (int i = 0; i < n; i++)
     {
         int pipe_fd[2];
@@ -103,6 +119,7 @@ void execute(vector<string> &tokens)
 
         if (pid == 0)
         {
+            signal(SIGINT, SIG_DFL);
             if (prev_fd != -1)
             {
                 dup2(prev_fd, STDIN_FILENO);
@@ -148,6 +165,8 @@ void execute(vector<string> &tokens)
             exit(1);
         }
         else if(pid>0){
+            pids.push_back(pid);
+            if(!isBackground) foreground_pid = pid;
             if(prev_fd != -1) close(prev_fd);
             if(i<n-1){
                 close(pipe_fd[1]);
@@ -159,11 +178,21 @@ void execute(vector<string> &tokens)
         }
     }
 
-    for(int i=0;i<n;i++) wait(NULL);
+    if(!isBackground){
+        for(pid_t pid : pids){
+            waitpid(pid,nullptr,0);
+        }
+        foreground_pid = -1;
+    }
+    else{
+        cout<<"[Running in background]"<<endl;
+    }
 }
 
 int main()
 {
+    signal(SIGCHLD, handle_sigchld);
+    signal(SIGINT, SIG_IGN);
     while (true)
     {
         string input;
